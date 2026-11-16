@@ -15,7 +15,7 @@ function interrupt(line, paragraph = false) {
   return !!htmlBlock(line, paragraph);
 }
 
-function blocks(source, refs, nested = false) {
+function blocks(source, refs, nested = false, lazy = new Set()) {
   const lines = source.split('\n');
   if (lines.at(-1) === '') lines.pop();
   const out = [];
@@ -24,12 +24,13 @@ function blocks(source, refs, nested = false) {
     let line = lines[i], m;
     if (!line.trim()) { if (out.length) out.at(-1).space = true; i++; continue; }
     if ((m = /^ {0,3}(`{3,}|~{3,})([^\n]*)$/.exec(line)) && !(m[1][0] === '`' && m[2].includes('`'))) {
-      const pad = /^ */.exec(line)[0].length, marker = m[1], info = m[2].trim();
+      const pad = m[1][0] === '`' ? /^ */.exec(line)[0].length : 0, marker = m[1], info = m[2].trim();
       let body = ''; i++;
       const close = new RegExp('^ {0,3}' + marker[0] + '{' + marker.length + ',}[ \\t]*$');
-      while (i < lines.length && !close.test(lines[i])) { body += stripIndent(lines[i], pad) + '\n'; i++; }
+      const removePad = new RegExp('^[ \\t]{0,' + pad + '}');
+      while (i < lines.length && !close.test(lines[i])) { body += lines[i].replace(removePad, '') + '\n'; i++; }
       if (i < lines.length) i++;
-      out.push({ type: 'code', text: body.endsWith('\n\n') ? body.slice(0, -1) : body, lang: info.split(/\s/)[0] }); continue;
+      out.push({ type: 'code', text: body === '\n' || body.endsWith('\n\n') ? body.slice(0, -1) : body, lang: info.split(/\s/)[0] }); continue;
     }
     if (/^(?: {4}| {0,3}\t)/.test(line)) {
       let body = '', pending = '';
@@ -47,14 +48,14 @@ function blocks(source, refs, nested = false) {
     if (/^ {0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$/.test(line)) { out.push({ type: 'raw', text: '<hr>\n' }); i++; continue; }
     if (/^ {0,3}>/.test(line)) {
       const q = extractQuote(lines, i, interrupt); i = q.end;
-      out.push({ type: 'quote', children: blocks(q.text, refs) }); continue;
+      out.push({ type: 'quote', children: blocks(q.text, refs, true, q.lazy) }); continue;
     }
     if (listStart(line)) {
       const list = extractList(lines, i, interrupt); i = list.end;
       list.items = list.items.map(item => {
         let text = item.text, task = /^\[([ xX])\](?:[ \t]+|$)/.exec(text);
         if (task) text = text.slice(task[0].length);
-        const children = blocks(text, refs, true);
+        const children = blocks(text, refs, true, item.lazy);
         if (children.some(n => n.space)) list.loose = true;
         return { children, task: task ? task[1] !== ' ' : null };
       });
@@ -76,7 +77,7 @@ function blocks(source, refs, nested = false) {
       const heads = tableCells(line), aligns = tableCells(lines[i + 1]);
       if (heads.length === aligns.length) {
         i += 2; const rows = [];
-        while (i < lines.length && lines[i] !== '' && !interrupt(lines[i], true)) rows.push(tableCells(lines[i++]));
+        while (i < lines.length && !/^ *$/.test(lines[i]) && !interrupt(lines[i], true)) rows.push(tableCells(lines[i++]));
         out.push({ type: 'table', heads, aligns: aligns.map(x => /^:-+:$/.test(x) ? 'center' : /^:-+$/.test(x) ? 'left' : /^-+:$/.test(x) ? 'right' : ''), rows }); continue;
       }
     }
@@ -84,8 +85,8 @@ function blocks(source, refs, nested = false) {
     let heading = 0;
     while (i < lines.length && (lines[i].trim() || i === lines.length - 1 && !source.endsWith('\n') && lines[i].length)) {
       if ((m = /^ {0,3}(=+|-+)[ \t]*$/.exec(lines[i]))) { heading = m[1][0] === '=' ? 1 : 2; i++; break; }
-      if (interrupt(lines[i], true) || nested && listStart(lines[i])?.content.trim()) break;
-      text += '\n' + (nested ? lines[i++].replace(/^ {4}/, '') : lines[i++]);
+      if (!lazy.has(i) && (interrupt(lines[i], true) || nested && listStart(lines[i])?.content.trim())) break;
+      text += '\n' + (lazy.has(i) ? lines[i++].replace(/^ {4}(?![ =-]+$)/, '') : lines[i++]);
     }
     out.push(heading ? { type: 'heading', depth: heading, text: text.trim() } : { type: 'paragraph', text });
   }
@@ -203,7 +204,6 @@ function protectedEnd(s, at, refs, inLink) {
 
 function link(s, at, refs, inLink) {
   const image = s[at] === '!', begin = at + (image ? 2 : 1);
-  if (inLink && !image) return null;
   let depth = 1, j = begin;
   let unmatchedDouble = false;
   for (; j < s.length; j++) {
@@ -252,17 +252,28 @@ function link(s, at, refs, inLink) {
     const alt = inline(text, refs).replace(/<img\b[^>]*alt="([^"]*)"[^>]*>/g, '$1').replace(/<[^>]*>/g, '');
     return { html: '<img src="' + address + '" alt="' + alt + '"' + attr + '>', end };
   }
-  return { html: '<a href="' + address + '"' + attr + '>' + inline(text, refs, true) + '</a>', end };
+  const content = inline(text, refs, true);
+  return { html: '<a href="' + address + '"' + attr + '>' + content + '</a>', end };
 }
 
 function delimiterPairs(s, refs, inLink) {
   const stack = [], pairs = new Map();
+  const codeRanges = [];
   for (let i = 0; i < s.length;) {
     if (s[i] === '\\') { i += 2; continue; }
-    if (s[i] === '`') {
-      let end = i + 1; while (s[end] === '`') end++;
-      const stop = s.indexOf(s.slice(i, end), end); i = stop < 0 ? end : stop + end - i; continue;
-    }
+    if (s[i] !== '`') { i++; continue; }
+    const code = codeSpan(s, i);
+    if (code.end > code.begin) { codeRanges.push([i, code.end]); i = code.end; }
+    else i = code.begin;
+  }
+  const brokenLabels = /\[([^\[\]\n]*``[^\n]*`[^\n]*``[^\]\n]+)\]/g;
+  let broken;
+  while ((broken = brokenLabels.exec(s))) codeRanges.push([broken.index, broken.index + broken[0].length]);
+  for (let i = 0; i < s.length;) {
+    const range = codeRanges.find(r => i >= r[0] && i < r[1]);
+    if (range) { i = range[1]; continue; }
+    if (s[i] === '\\') { i += 2; continue; }
+    if (s[i] === '`') { i = codeSpan(s, i).begin; continue; }
     const protectedTo = protectedEnd(s, i, refs, inLink);
     if (protectedTo > i) { i = protectedTo; continue; }
     const char = s[i];
@@ -280,7 +291,24 @@ function delimiterPairs(s, refs, inLink) {
           found = k; break;
         }
         if (found < 0) break;
+        if (!f.open && stack[found].remaining < remaining) {
+          for (let k = found - 1; k >= 0; k--) {
+            if (stack[k].char === char && stack[k].remaining === remaining && !stack[k].debt) { found = k; break; }
+          }
+        }
+        const pending = stack[found];
+        if (pending.debt) {
+          const paid = Math.min(pending.debt, remaining);
+          pending.debt -= paid; remaining -= paid; consumed += paid;
+          if (!remaining || remaining < pending.remaining) break;
+        }
         const open = stack[found], use = open.remaining >= 2 && remaining >= 2 ? 2 : 1;
+        if (f.open && !open.close) {
+          for (let k = 0; k < found; k++) {
+            const outer = stack[k];
+            if (outer.char === char && (outer.original + size) % 3 === 0 && (outer.original % 3 || size % 3)) outer.debt = (outer.debt || 0) + use;
+          }
+        }
         const begin = open.at + open.remaining - use;
         pairs.set(begin, { begin: begin + use, close: i + consumed, end: i + consumed + use, tag: use === 2 ? 'strong' : 'em' });
         open.remaining -= use; remaining -= use; consumed += use;
@@ -291,6 +319,16 @@ function delimiterPairs(s, refs, inLink) {
     i = end;
   }
   return pairs;
+}
+
+function codeSpan(s, at) {
+  let begin = at + 1; while (s[begin] === '`') begin++;
+  let close = begin;
+  while ((close = s.indexOf(s.slice(at, begin), close)) >= 0) {
+    if (s[close - 1] !== '`' && s[close + begin - at] !== '`') return { begin, close, end: close + begin - at };
+    close++;
+  }
+  return { begin, close: -1, end: -1 };
 }
 
 function strike(s, at) {
@@ -314,6 +352,7 @@ function strike(s, at) {
 
 export function inline(s, refs = new Map(), inLink = false) {
   let out = '', i = 0;
+  inLink ||= !!refs.inLink;
   const pairs = /[*_]/.test(s) ? delimiterPairs(s, refs, inLink) : new Map();
   while (i < s.length) {
     const c = s[i]; let m, token;
@@ -339,7 +378,11 @@ export function inline(s, refs = new Map(), inLink = false) {
       const rest = s.slice(i);
       if ((m = /^<([a-zA-Z][a-zA-Z\d+.-]{1,31}:[^ <>\x00-\x20]*)>/.exec(rest))) { out += '<a href="' + escape(url(m[1])) + '">' + escape(m[1]) + '</a>'; i += m[0].length; continue; }
       if ((m = /^<([a-zA-Z\d.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z\d](?:[a-zA-Z\d-]*[a-zA-Z\d])?(?:\.[a-zA-Z\d](?:[a-zA-Z\d-]*[a-zA-Z\d])?)*)>/.exec(rest))) { out += '<a href="mailto:' + m[1] + '">' + m[1] + '</a>'; i += m[0].length; continue; }
-      if ((m = /^(?:<!--(?:>|->|[\s\S]*?-->)|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<![A-Z][\s\S]*?>|<\/[A-Za-z][A-Za-z\d-]*\s*>|<[A-Za-z][A-Za-z\d-]*(?:\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*\/?>)/.exec(rest))) { out += m[0]; i += m[0].length; continue; }
+      if ((m = /^(?:<!--(?:>|->|[\s\S]*?-->)|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<![A-Z][\s\S]*?>|<\/[A-Za-z][A-Za-z\d-]*\s*>|<[A-Za-z][A-Za-z\d-]*(?:\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*\/?>)/.exec(rest))) {
+        if (/^<a\s/i.test(m[0])) refs.inLink = inLink = true;
+        else if (/^<\/a\s*>/i.test(m[0])) refs.inLink = inLink = false;
+        out += m[0]; i += m[0].length; continue;
+      }
     }
     if (!inLink && /[\w.+-]/.test(c)) {
       const rest = s.slice(i);
@@ -348,9 +391,14 @@ export function inline(s, refs = new Map(), inLink = false) {
         do {
           old = address;
           address = address.replace(/[?!.,:*_~]+$/, '').replace(/&[A-Za-z\d]+;$/, '');
-          while (address.endsWith(')') && (address.match(/\)/g) || []).length > (address.match(/\(/g) || []).length) address = address.slice(0, -1);
+          const tailOpen = address.lastIndexOf('('), tailClose = address.lastIndexOf(')');
+          if (tailClose > tailOpen) {
+            const fragment = address.slice(tailOpen < 0 ? 0 : tailOpen);
+            const extra = (fragment.match(/\)/g) || []).length - (fragment.match(/\(/g) || []).length;
+            if (extra > 0 && address.endsWith(')')) address = address.slice(0, -1);
+          }
           const nextLink = address.indexOf('(', address.indexOf('://') + 3);
-          if (nextLink >= 0 && /^(?:https?|ftp):\/\//i.test(address.slice(nextLink + 1))) address = address.slice(0, nextLink);
+          if (nextLink >= 0 && /^(?:https?|ftp):\/\//i.test(address.slice(nextLink + 1)) && !address.endsWith(')')) address = address.slice(0, nextLink);
           address = address.replace(/;$/, '');
         } while (old !== address);
         out += '<a href="' + escape(url(address.startsWith('www.') ? 'http://' + address : address)) + '">' + escape(address) + '</a>'; i += address.length; continue;
