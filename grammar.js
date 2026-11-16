@@ -75,3 +75,23 @@ export function expandIndent(value, offset = 0) {
   }
   return tabs ? ' '.repeat(column - offset) + value.slice(index) : value;
 }
+export function couldStartList(line) {
+  let position = 0;
+  while (line.charCodeAt(position) === 32 && position < 4) position++;
+  if (position === 4) return false;
+  const code = line.charCodeAt(position);
+  return code === 42 || code === 43 || code === 45 || code >= 48 && code <= 57;
+}
+export function closesFence(line, marker) {
+  let position = 0;
+  while (position < 4 && line.charCodeAt(position) === 32) position++;
+  if (position === 4) return false;
+  const begin = position, code = marker.charCodeAt(0);
+  while (line.charCodeAt(position) === code) position++;
+  if (position - begin < marker.length) return false;
+  while (position < line.length) {
+    const trailing = line.charCodeAt(position++);
+    if (trailing !== 32 && trailing !== 9) return false;
+  }
+  return true;
+}

@@ -77,9 +77,9 @@ function blocks(source, refs, tight = false) {
     previousStart = cursor;
     let match;
     if ((match = g.fence.exec(line)) && !(match[1][0] === '`' && match[2].includes('`'))) {
-      let end = next, body = ''; const close = new RegExp('^ {0,3}' + match[1][0] + '{' + match[1].length + ',}[ \\t]*$');
+      let end = next, body = '';
       const amount = match[1][0] === '`' ? /^ */.exec(line)[0].length : 0;
-      while (end < source.length) { const [part, following] = g.lineAt(source, end); if (close.test(part)) { end = following; break; } body += (amount ? part.replace(new RegExp('^[ \t]{0,' + amount + '}'), '') : part) + (following > end + part.length ? '\n' : ''); end = following; }
+      while (end < source.length) { const [part, following] = g.lineAt(source, end); if (g.closesFence(part, match[1])) { end = following; break; } body += (amount ? part.replace(new RegExp('^[ \t]{0,' + amount + '}'), '') : part) + (following > end + part.length ? '\n' : ''); end = following; }
       if (body.endsWith('\n')) body = body.slice(0, -1);
       if (body && !body.endsWith('\n')) body += '\n';
       const language = g.unescape(match[2].trim().split(/\s+/)[0]);
@@ -96,7 +96,7 @@ function blocks(source, refs, tight = false) {
       const container = quote(source, cursor, line => interrupts(line, true));
       const body = blocks(container.body, refs); output.push(() => '<blockquote>\n' + finish(body) + '</blockquote>\n'); cursor = container.end; continue;
     }
-    const container = list(source, cursor, line => interrupts(line, true));
+    const container = g.couldStartList(line) ? list(source, cursor, line => interrupts(line, true), line) : null;
     if (container) {
       const rendered = container.items.map(item => {
         let body = item.body, task = /^\[([ xX])\][ \t]+/.exec(body), check = '';
