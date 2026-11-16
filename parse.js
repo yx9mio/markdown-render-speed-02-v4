@@ -371,10 +371,10 @@ function inline(text, refs, inLink = refs.inLink || false, raw = refs.raw || fal
     }
     if (!inLink && (character === 'h' || character === 'f' || character === 'w' || /[\w.!#$%&'*+/=?^`{|}~-]/.test(character))) {
       const rest = text.slice(cursor);
-      match = /^(?:(?:[Hh][Tt][Tt][Pp][Ss]?|[Ff][Tt][Pp]):\/\/|www\.)(?:[^\s<>]+)/.exec(rest);
+      match = g.inlineUrl.exec(rest);
       let email = false;
-      if (!match) match = /^(?:mailto:|xmpp:)[A-Za-z\d._+-]+@(?:[A-Za-z\d-]+\.)+[A-Za-z\d-]+(?:\/[A-Za-z\d@._+-]+)?/.exec(rest);
-      if (!match) { match = /^[A-Za-z\d._+-]+@(?:[A-Za-z\d-]+\.)+[A-Za-z\d]+(?=[^A-Za-z\d-]|$)/.exec(rest); email = true; }
+      if (!match) match = g.protocolEmail.exec(rest);
+      if (!match) { match = g.bareEmail.exec(rest); email = true; }
       if (match && (email || /^(?:mailto:|xmpp:)/.test(match[0])) && (match[0].endsWith('-') || text[cursor + match[0].length] === '_')) { html += g.escapeHtml(match[0]); cursor += match[0].length; continue; }
       if (match) {
         let value = match[0];

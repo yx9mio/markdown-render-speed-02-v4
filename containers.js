@@ -1,4 +1,4 @@
-import { bullet, thematic, heading, fence, indent, stripIndent, lineAt } from './grammar.js';
+import { bullet, thematic, heading, fence, indent, stripIndent, lineAt, expandIndent } from './grammar.js';
 
 export function quote(source, start, interrupt) {
   let cursor = start, body = '', blank = false, lazy = true, activeFence = null;
@@ -6,8 +6,9 @@ export function quote(source, start, interrupt) {
     const [line, next] = lineAt(source, cursor);
     const match = /^ {0,3}>[ \t]?/.exec(line);
     if (match) {
-      const expanded = line.replace(/^( {0,3}>)([ \t]*)/, (_, prefix, spaces) => prefix + (() => { let column = prefix.length, output = ''; for (const character of spaces) { const width = character === '\t' ? 4 - column % 4 : 1; output += ' '.repeat(width); column += width; } return output; })());
-      const content = expanded.replace(/^ {0,3}> ?/, '');
+      const markerEnd = line.indexOf('>') + 1;
+      const expanded = expandIndent(line.slice(markerEnd), markerEnd);
+      const content = expanded[0] === ' ' ? expanded.slice(1) : expanded;
       body += content + (next > cursor + line.length ? '\n' : '');
       blank = !content.trim();
       const opening = fence.exec(content);
@@ -29,7 +30,7 @@ export function list(source, start, interrupt) {
   const initial = bullet.exec(first);
   if (!initial || thematic.test(first)) return null;
   const ordered = initial[2].length > 1;
-  const marker = initial[2].slice(-1), base = initial[1].length;
+  const marker = initial[2].slice(-1);
   const items = [];
   let cursor = start, loose = false;
   while (cursor < source.length) {
@@ -42,7 +43,7 @@ export function list(source, start, interrupt) {
     let width = padding - markerEnd;
     if (!match[4] || width > 4 || width === 0) width = 1;
     const contentIndent = markerEnd + width;
-    const initialLine = (' '.repeat(markerEnd) + line.slice(markerEnd)).replace(/^[ \t]+/, prefix => { let column = 0; for (const character of prefix) column += character === '\t' ? 4 - column % 4 : 1; return ' '.repeat(column); });
+    const initialLine = expandIndent(' '.repeat(markerEnd) + line.slice(markerEnd));
     let body = stripIndent(initialLine, contentIndent), end = next, pending = '', hadBlank = false;
     let activeFence = fence.exec(body)?.[1] || null;
     let lazy = !activeFence && indent(body)[0] < 4 && !heading.test(body) && !thematic.test(body);
@@ -56,7 +57,7 @@ export function list(source, start, interrupt) {
       if (depth < contentIndent && sibling && !thematic.test(continuation)) break;
       if (depth >= contentIndent) {
         if (pending) { body += pending; pending = ''; }
-        body += stripIndent(continuation.replace(/^[ \t]+/, prefix => { let column = 0; for (const character of prefix) column += character === '\t' ? 4 - column % 4 : 1; return ' '.repeat(column); }), contentIndent) + (following > end + continuation.length ? '\n' : '');
+        body += stripIndent(expandIndent(continuation), contentIndent) + (following > end + continuation.length ? '\n' : '');
       } else {
         if (!lazy || pending || interrupt(continuation) || !body.trim()) break;
         body += (depth < 4 || /^[*+-] /.test(continuation.trimStart()) ? continuation : continuation.trimStart()) + (following > end + continuation.length ? '\n' : '');
