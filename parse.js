@@ -161,38 +161,6 @@ function flanks(s, at, length, char) {
   return { open: left && (char !== '_' || !right || bp), close: right && (char !== '_' || !left || ap) };
 }
 
-function emphasis(s, at, refs, inLink) {
-  const char = s[at]; let count = 1;
-  while (s[at + count] === char) count++;
-  const first = flanks(s, at, count, char);
-  if (!first.open) return null;
-  let balance = count;
-  for (let j = at + count; j < s.length;) {
-    if (s[j] === '\\') { j += 2; continue; }
-    if (s[j] === '`') { let k = j + 1; while (s[k] === '`') k++; const stop = s.indexOf(s.slice(j, k), k); j = stop < 0 ? k : stop + k - j; continue; }
-    const span = protectedEnd(s, j, refs, inLink);
-    if (span > j) { j = span; continue; }
-    if ((s[j] === '*' || s[j] === '_') && s[j] !== char) {
-      const nested = emphasis(s, j, refs, inLink); if (nested) { j = nested.end; continue; }
-    }
-    if (s[j] !== char) { j++; continue; }
-    let size = 1; while (s[j + size] === char) size++;
-    const f = flanks(s, j, size, char);
-    const forbidden = (first.close || f.open) && (count + size) % 3 === 0 && (count % 3 !== 0 || size % 3 !== 0);
-    if (f.close && f.open && !forbidden) { j += size; continue; }
-    if (f.close && !forbidden) {
-      balance -= size;
-      if (balance <= 0) {
-        const available = Math.min(count, size), used = available % 2 ? 1 : 2, end = j + Math.max(0, size + balance) - used;
-        const tag = used === 2 ? 'strong' : 'em';
-        return { html: '<' + tag + '>' + inline(s.slice(at + used, end), refs, inLink) + '</' + tag + '>', end: end + used };
-      }
-    } else if (f.open) balance += size;
-    j += size;
-  }
-  return null;
-}
-
 function protectedEnd(s, at, refs, inLink) {
   if (s[at] === '<') {
     const m = /^(?:<!--[\s\S]*?-->|<\/?[A-Za-z][^<>]*>|<[^<>\s]+>)/.exec(s.slice(at));
@@ -419,6 +387,12 @@ export function inline(s, refs = new Map(), inLink = false) {
       if (m[0][1] === '#') { const hex = /[xX]/.test(m[0][2]), number = parseInt(m[0].slice(hex ? 3 : 2, -1), hex ? 16 : 10); out += escape(String.fromCodePoint(number > 0 && number <= 0x10ffff && !(number >= 0xd800 && number <= 0xdfff) ? number : 0xfffd), true); }
       else out += m[0];
       i += m[0].length; continue;
+    }
+    const ascii = c.charCodeAt(0);
+    if (ascii >= 65 && ascii <= 90 || ascii >= 97 && ascii <= 122 || ascii >= 48 && ascii <= 57) {
+      let j = i + 1;
+      while (j < s.length) { const n = s.charCodeAt(j); if (!(n >= 65 && n <= 90 || n >= 97 && n <= 122 || n >= 48 && n <= 57)) break; j++; }
+      out += s.slice(i, j); i = j; continue;
     }
     out += escape(c); i++;
   }

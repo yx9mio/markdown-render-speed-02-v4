@@ -21,13 +21,12 @@ export function extractList(lines, start, interrupt) {
     if (!head || head.ordered !== first.ordered || head.marker !== first.marker) break;
     if (/^ {0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$/.test(lines[i])) break;
     const body = [head.content], lazy = new Set(); i++;
-    let blank = false, itemLoose = false, fence = /^ {0,3}(`{3,}|~{3,})/.exec(head.content)?.[1] || null;
+    let blank = false, fence = /^ {0,3}(`{3,}|~{3,})/.exec(head.content)?.[1] || null;
     while (i < lines.length) {
       const raw = lines[i], expanded = indentLeading(raw), next = listStart(raw);
       if (!raw.trim()) { body.push(''); blank = true; i++; if (!head.content.trim()) break; continue; }
       const leading = /^ */.exec(expanded)[0].length;
       if (leading >= head.offset) {
-        if (blank) itemLoose = true;
         const content = expanded.slice(head.offset), fm = /^ {0,3}(`{3,}|~{3,})/.exec(content);
         if (fm && (!fm[1].startsWith('`') || !content.slice(fm[0].length).includes('`'))) fence = fence && fm[1][0] === fence[0] && fm[1].length >= fence.length ? null : fence || fm[1];
         body.push(content); blank = false; i++; continue;
@@ -59,7 +58,6 @@ export function extractQuote(lines, start, interrupt) {
     }
     if (m) {
       const fm = /^ {0,3}(`{3,}|~{3,})/.exec(m[1]);
-      const opening = !fence && fm && (!fm[1].startsWith('`') || !m[1].slice(fm[0].length).includes('`'));
       text += m[1] + '\n'; previousBlank = !m[1].trim();
       if (fm && (!fm[1].startsWith('`') || !m[1].slice(fm[0].length).includes('`'))) fence = fence && fm[1][0] === fence[0] && fm[1].length >= fence.length ? null : fence || fm[1];
       nonParagraph = !!fence || /^ {4}/.test(m[1]) || !!htmlBlock(m[1], true); i++; lineNumber++; continue;
