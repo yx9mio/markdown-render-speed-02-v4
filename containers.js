@@ -1,4 +1,4 @@
-import { indent } from './grammar.js';
+import { indent, indentLeading } from './grammar.js';
 
 export function listStart(line) {
   const m = /^( {0,3})([*+-]|\d{1,9}[.)])(?:([ \t]+)(.*)|$)/.exec(line);
@@ -15,39 +15,47 @@ export function listStart(line) {
 
 export function extractList(lines, start, interrupt) {
   const first = listStart(lines[start]), items = [];
-  let i = start, loose = false;
+  let i = start, loose = false, space = false;
   while (i < lines.length) {
     const head = listStart(lines[i]);
     if (!head || head.ordered !== first.ordered || head.marker !== first.marker) break;
+    if (/^ {0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$/.test(lines[i])) break;
     const body = [head.content]; i++;
-    let blank = false, itemLoose = false;
+    let blank = false, itemLoose = false, fence = /^ {0,3}(`{3,}|~{3,})/.exec(head.content)?.[1] || null;
     while (i < lines.length) {
-      const raw = lines[i], expanded = indent(raw), next = listStart(raw);
-      if (!raw.trim()) { body.push(''); blank = true; i++; continue; }
+      const raw = lines[i], expanded = indentLeading(raw), next = listStart(raw);
+      if (!raw.trim()) { body.push(''); blank = true; i++; if (!head.content.trim()) break; continue; }
       const leading = /^ */.exec(expanded)[0].length;
       if (leading >= head.offset) {
         if (blank) itemLoose = true;
-        body.push(expanded.slice(head.offset)); blank = false; i++; continue;
+        const content = expanded.slice(head.offset), fm = /^ {0,3}(`{3,}|~{3,})/.exec(content);
+        if (fm && (!fm[1].startsWith('`') || !content.slice(fm[0].length).includes('`'))) fence = fence && fm[1][0] === fence[0] && fm[1].length >= fence.length ? null : fence || fm[1];
+        body.push(content); blank = false; i++; continue;
       }
-      if (next || blank || interrupt(raw, true)) break;
-      body.push(raw); i++;
+      if (next || blank || fence && /^ {0,3}(?:`{3,}|~{3,})/.test(body.at(-1)) || interrupt(raw, true)) break;
+      body.push((listStart(raw.trimStart()) ? '    ' : '') + raw.trimStart()); i++;
     }
-    if (itemLoose) loose = true;
     const next = i < lines.length ? listStart(lines[i]) : null;
     if (blank && next && next.ordered === first.ordered && next.marker === first.marker) loose = true;
+    space = blank;
     while (body.at(-1) === '') body.pop();
     items.push({ text: body.join('\n') });
   }
-  return { ordered: first.ordered, number: first.number, items, loose, end: i };
+  return { ordered: first.ordered, number: first.number, items, loose, space, end: i };
 }
 
 export function extractQuote(lines, start, interrupt) {
-  let i = start, text = '', previousBlank = false;
+  let i = start, text = '', previousBlank = false, nonParagraph = false, fence = null;
   while (i < lines.length) {
-    const m = /^ {0,3}>[ \t]?(.*)$/.exec(lines[i]);
-    if (m) { text += m[1] + '\n'; previousBlank = !m[1].trim(); i++; continue; }
-    if (!lines[i].trim() || previousBlank || interrupt(lines[i], true)) break;
-    text += lines[i++] + '\n';
+    const m = /^ {0,3}> ?(.*)$/.exec(indent(lines[i]));
+    if (m) {
+      text += m[1] + '\n'; previousBlank = !m[1].trim();
+      const fm = /^ {0,3}(`{3,}|~{3,})/.exec(m[1]);
+      if (fm && (!fm[1].startsWith('`') || !m[1].slice(fm[0].length).includes('`'))) fence = fence && fm[1][0] === fence[0] && fm[1].length >= fence.length ? null : fence || fm[1];
+      nonParagraph = !!fence || /^(?: {4}| {0,3}<)/.test(m[1]); i++; continue;
+    }
+    if (!lines[i].trim() || previousBlank || nonParagraph || interrupt(lines[i], true)) break;
+    text += (/^ {0,3}(?:=+|-+)\s*$/.test(lines[i]) ? '    ' : '') + lines[i++].replace(/^ {4}(?=\s*[*+-] )/, '') + '\n';
   }
-  return { text, end: i };
+  return { text: text.replace(/\n$/, ''), end: i };
 }

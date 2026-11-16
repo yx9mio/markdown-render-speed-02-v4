@@ -5,10 +5,20 @@ export function escape(text, all = false) {
   if (!all) return text.replace(/&(?!#\d+;|#x[\da-fA-F]+;|[A-Za-z][A-Za-z\d]*;)|[<>"']/g, escaped);
   return text.replace(special, escaped);
 }
-export const label = text => text.trim().replace(/\s+/g, ' ').toLowerCase();
+export const label = text => text.trim().replace(/\s+/g, ' ').toLowerCase().replace(/ß/g, 'ss');
 export const unescape = text => text.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, '$1');
 export const whitespace = char => /\s/.test(char);
 export const punctuation = char => /[\p{P}\p{S}]/u.test(char);
+export const url = text => {
+  try { return encodeURI(text).replace(/%25/g, '%'); } catch { return text; }
+};
+export function stripIndent(text, columns) {
+  let i = 0, used = 0;
+  while (i < text.length && used < columns && (text[i] === ' ' || text[i] === '\t')) {
+    used += text[i++] === '\t' ? 4 - used % 4 : 1;
+  }
+  return ' '.repeat(Math.max(0, used - columns)) + text.slice(i);
+}
 
 export function indent(text) {
   let column = 0, out = '';
@@ -17,6 +27,10 @@ export function indent(text) {
     else { out += text[i]; column++; }
   }
   return out;
+}
+export function indentLeading(text) {
+  const prefix = /^[ \t]*/.exec(text)[0];
+  return indent(prefix) + text.slice(prefix.length);
 }
 
 export function destination(s, at, definition) {
@@ -29,7 +43,7 @@ export function destination(s, at, definition) {
   for (; i < s.length; i++) {
     const c = s[i];
     if (c === '\\' && i + 1 < s.length) { i++; continue; }
-    if (/\s/.test(c) || c === ')' && !depth) break;
+    if (/[ \t\n]/.test(c) || c === ')' && !depth) break;
     if (c === '(') depth++;
     if (c === ')') depth--;
   }
@@ -47,7 +61,7 @@ export function htmlBlock(line, paragraph) {
   if (s.startsWith('<![CDATA[')) return { end: /\]\]>/ };
   if (/^<![A-Z]/.test(s)) return { end: />/ };
   if (/^<\/?/.test(s) && blockTags.test(s.replace(/^<\/?/, ''))) return {};
-  if (!paragraph && /^<\/?[A-Za-z][A-Za-z\d-]*(?:\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*\/?>\s*$/.test(s)) return {};
+  if (!paragraph && (/^<\/[A-Za-z][A-Za-z\d-]*\s*>\s*$/.test(s) || /^<[A-Za-z][A-Za-z\d-]*(?:\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*\/?>\s*$/.test(s))) return {};
   return null;
 }
 
