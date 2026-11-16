@@ -25,4 +25,14 @@ divided by repetitions. The script reports the median of the three values.
 `RUNS`, `REPETITIONS`, and `PARSER` override those defaults. This raw CPU proxy
 is used because official adjusted CPU is unavailable in the kit.
 
+Final measurements on parser commit `d1eaf9e`, with 100 repetitions per run:
+
+| Run | Total CPU (µs) | CPU per pass (µs) |
+| --- | ---: | ---: |
+| 1 | 59,442,965 | 594,429.65 |
+| 2 | 57,872,367 | 578,723.67 |
+| 3 | 58,558,337 | 585,583.37 |
+
+The median is **585,583.37 µs per pass**, below the **1,150,000 µs** target.
+
 No submission command was run, and the recording process was left untouched.
