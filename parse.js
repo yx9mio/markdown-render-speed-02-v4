@@ -77,9 +77,9 @@ function blocks(source, refs, tight = false) {
     previousStart = cursor;
     let match;
     if ((match = g.fence.exec(line)) && !(match[1][0] === '`' && match[2].includes('`'))) {
-      let end = next, body = '';
+      let end = next, body = ''; const close = new RegExp('^ {0,3}' + match[1][0] + '{' + match[1].length + ',}[ \\t]*$');
       const amount = match[1][0] === '`' ? /^ */.exec(line)[0].length : 0;
-      while (end < source.length) { const [part, following] = g.lineAt(source, end); if (g.closesFence(part, match[1])) { end = following; break; } body += (amount ? part.replace(new RegExp('^[ \t]{0,' + amount + '}'), '') : part) + (following > end + part.length ? '\n' : ''); end = following; }
+      while (end < source.length) { const [part, following] = g.lineAt(source, end); if (close.test(part)) { end = following; break; } body += (amount ? part.replace(new RegExp('^[ \t]{0,' + amount + '}'), '') : part) + (following > end + part.length ? '\n' : ''); end = following; }
       if (body.endsWith('\n')) body = body.slice(0, -1);
       if (body && !body.endsWith('\n')) body += '\n';
       const language = g.unescape(match[2].trim().split(/\s+/)[0]);
@@ -96,7 +96,7 @@ function blocks(source, refs, tight = false) {
       const container = quote(source, cursor, line => interrupts(line, true));
       const body = blocks(container.body, refs); output.push(() => '<blockquote>\n' + finish(body) + '</blockquote>\n'); cursor = container.end; continue;
     }
-    const container = g.couldStartList(line) ? list(source, cursor, line => interrupts(line, true), line) : null;
+    const container = list(source, cursor, line => interrupts(line, true));
     if (container) {
       const rendered = container.items.map(item => {
         let body = item.body, task = /^\[([ xX])\][ \t]+/.exec(body), check = '';
@@ -261,7 +261,7 @@ function inline(text, refs, inLink = refs.inLink || false, raw = refs.raw || fal
   const masked = emphasisMask(text);
   let html = '', cursor = 0;
   while (cursor < text.length) {
-    const character = text[cursor]; let match;
+    const character = text[cursor], code = text.charCodeAt(cursor); let match;
     if (character === '\\') {
       const following = text[cursor + 1];
       if (following === '\n') { html += '<br>'; cursor += 2; while (text[cursor] === ' ' || text[cursor] === '\t') cursor++; continue; }
@@ -369,7 +369,7 @@ function inline(text, refs, inLink = refs.inLink || false, raw = refs.raw || fal
       }
       html += '~'.repeat(count); cursor += count; continue;
     }
-    if (!inLink && (character === 'h' || character === 'f' || character === 'w' || /[\w.!#$%&'*+/=?^`{|}~-]/.test(character))) {
+    if (!inLink && g.canAutolink(code)) {
       const rest = text.slice(cursor);
       match = g.inlineUrl.exec(rest);
       let email = false;
@@ -393,8 +393,20 @@ function inline(text, refs, inLink = refs.inLink || false, raw = refs.raw || fal
       const numeric = /^&#(x[\da-f]{1,6}|[0-9]{1,7});/i.exec(text.slice(cursor));
       if (numeric) { const number = numeric[1][0].toLowerCase() === 'x' ? parseInt(numeric[1].slice(1), 16) : Number(numeric[1]); html += g.escapeHtml(number === 0 || number > 0x10ffff || number >= 0xd800 && number <= 0xdfff ? '\ufffd' : String.fromCodePoint(number), true); cursor += numeric[0].length; continue; }
     }
-    html += raw ? character : g.escapeHtml(character, character !== '&');
-    if (character === '&' && !raw) { const entity = /^&(?:#\d{1,7}|#x[\da-f]{1,6}|[a-z]\w*);/i.exec(text.slice(cursor)); if (entity) { html = html.slice(0, -5) + entity[0]; cursor += entity[0].length; continue; } }
+    if (code >= 48 && code <= 57 || code >= 65 && code <= 90 || code >= 97 && code <= 122) {
+      const end = g.plainWordEnd(text, cursor, inLink);
+      html += text.slice(cursor, end); cursor = end; continue;
+    }
+    if (raw) html += character;
+    else if (character === '&') {
+      const entity = /^&(?:#\d{1,7}|#x[\da-f]{1,6}|[a-z]\w*);/i.exec(text.slice(cursor));
+      if (entity) { html += entity[0]; cursor += entity[0].length; continue; }
+      html += '&amp;';
+    } else if (character === '<') html += '&lt;';
+    else if (character === '>') html += '&gt;';
+    else if (character === '"') html += '&quot;';
+    else if (character === "'") html += '&#39;';
+    else html += character;
     cursor++;
   }
   return html;

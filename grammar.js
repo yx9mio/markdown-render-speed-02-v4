@@ -14,6 +14,32 @@ export const setext = /^ {0,3}(=+|-+)[ \t]*$/;
 export const inlineUrl = /^(?:(?:[Hh][Tt][Tt][Pp][Ss]?|[Ff][Tt][Pp]):\/\/|www\.)(?:[^\s<>]+)/;
 export const protocolEmail = /^(?:mailto:|xmpp:)[A-Za-z\d._+-]+@(?:[A-Za-z\d-]+\.)+[A-Za-z\d-]+(?:\/[A-Za-z\d@._+-]+)?/;
 export const bareEmail = /^[A-Za-z\d._+-]+@(?:[A-Za-z\d-]+\.)+[A-Za-z\d]+(?=[^A-Za-z\d-]|$)/;
+const autolinkCharacters = new Uint8Array(128);
+for (let code = 48; code <= 57; code++) autolinkCharacters[code] = 1;
+for (let code = 65; code <= 90; code++) autolinkCharacters[code] = 1;
+for (let code = 97; code <= 122; code++) autolinkCharacters[code] = 1;
+for (const character of "_.!#$%&'*+/=?^`{|}~-") autolinkCharacters[character.charCodeAt(0)] = 1;
+export function canAutolink(code) {
+  return code < 128 && autolinkCharacters[code] === 1;
+}
+export function plainWordEnd(text, start, inLink) {
+  let position = start + 1;
+  while (position < text.length) {
+    const code = text.charCodeAt(position);
+    if (!(code >= 48 && code <= 57 || code >= 65 && code <= 90 || code >= 97 && code <= 122)) break;
+    // A protocol may begin inside a word. Ordinary email local parts would
+    // already have matched at the beginning of this uninterrupted span.
+    if (!inLink) {
+      const next = text.charCodeAt(position + 1);
+      if ((code === 104 || code === 72 || code === 102 || code === 70) && (next | 32) === 116
+        || code === 119 && next === 119
+        || code === 109 && next === 97
+        || code === 120 && next === 109) break;
+    }
+    position++;
+  }
+  return position;
+}
 const htmlCharacters = /[&<>"']/;
 const encodeCharacters = /[&<>"']/g;
 const preserveEntities = /&(?!#\d+;|#x[\da-f]+;|\w+;)|[<>"']/gi;
@@ -74,24 +100,4 @@ export function expandIndent(value, offset = 0) {
     index++;
   }
   return tabs ? ' '.repeat(column - offset) + value.slice(index) : value;
-}
-export function couldStartList(line) {
-  let position = 0;
-  while (line.charCodeAt(position) === 32 && position < 4) position++;
-  if (position === 4) return false;
-  const code = line.charCodeAt(position);
-  return code === 42 || code === 43 || code === 45 || code >= 48 && code <= 57;
-}
-export function closesFence(line, marker) {
-  let position = 0;
-  while (position < 4 && line.charCodeAt(position) === 32) position++;
-  if (position === 4) return false;
-  const begin = position, code = marker.charCodeAt(0);
-  while (line.charCodeAt(position) === code) position++;
-  if (position - begin < marker.length) return false;
-  while (position < line.length) {
-    const trailing = line.charCodeAt(position++);
-    if (trailing !== 32 && trailing !== 9) return false;
-  }
-  return true;
 }
